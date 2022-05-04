@@ -1,24 +1,45 @@
 {% extends 'base.html' %}
+{% load cache %}
+{% load static %}
+{% load thumbnail %}
 {% block title %}
-    Главная страница
+Главная страница
 {% endblock %}
+
+
 {% block content %}
-    <div class="container py-5">
-        {% for post in posts %}
-            <ul>
-                <li>
-                    Автор: {{ post.author.get_full_name }}
-                </li>
-                <li>
-                    Дата публикации: {{ post.pub_date|date:"d E Y" }}
-                </li>
-            </ul>
-            <p>{{ post.text|linebreaks }}</p><br>
-            {% if post.group %}
-                <a href="{% url 'posts:group_list' post.group.slug %}">все записи группы {{ post.group.title }}</a>
-            {% endif %}
-            {% if not forloop.last %}
-                <hr>{% endif %}
-        {% endfor %}
-    </div>
+{% cache 20 index_page %}
+<div class="container py-5">
+
+    {% include 'posts/includes/switcher.html' %}
+    {% for post in page_obj %}
+
+    <ul>
+
+        <li>
+            Автор: <a href="{% url 'posts:profile' post.author.username %}">{{ post.author.get_full_name }}</a>
+        </li>
+        <li>
+            Дата публикации: {{ post.pub_date|date:"d E Y" }}
+
+        </li>
+    </ul>
+    <p>
+        {% thumbnail post.image "1200x790" crop="center" upscale=True as im %}
+            <img class="card-img my-2" src="{{ im.url }}">
+        {% endthumbnail %}
+        {{ post.text|linebreaks }}
+    </p><br>
+    {% if post.group %}
+    <a href="{% url 'posts:group_list' post.group.slug %}">все записи группы {{ post.group.title }}</a>
+    {% endif %}
+    {% if not forloop.last %}
+    <hr>
+    {% endif %}
+    {% endfor %}
+    {% include 'posts/includes/paginator.html' %}
+    {% endcache %}
+
+</div>
 {% endblock %}
+

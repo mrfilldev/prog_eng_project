@@ -1,8 +1,9 @@
-<!DOCTYPE html> <!-- Используется html 5 версии -->
-<html lang="ru" xmlns="http://www.w3.org/1999/html"> <!-- Язык сайта - русский -->
+<!DOCTYPE html>
+<html lang="ru" xmlns="http://www.w3.org/1999/html">
 {% load static %}
+
 <head>
-    <meta charset="utf-8"> <!-- Кодировка сайта -->
+    <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="icon" href="{% static 'img/fav/fav.ico' %}" type="image">
     <link rel="apple-touch-icon" sizes="180x180" href="{% static 'img/fav/apple-touch-icon.png' %}">
@@ -24,7 +25,7 @@
     {% block content %}
     {% endblock %}
 </main>
-<footer class="border-top text-center py-3">
+<footer>
     {% include 'includes/footer.html' %}
 </footer>
 </body>

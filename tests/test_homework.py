@@ -1,10 +1,14 @@
 import re
+import tempfile
 
 import pytest
 from django.contrib.admin.sites import site
 from django.contrib.auth import get_user_model
 from django.db.models import fields
-from django.template.loader import get_template, select_template
+from django.template.loader import select_template
+from django.core.paginator import Page
+
+from tests.utils import get_field_from_context
 
 try:
     from posts.models import Post
@@ -34,30 +38,6 @@ def search_refind(execution, user_code):
 
 class TestPost:
 
-    @pytest.mark.django_db(transaction=True)
-    def test_index_view(self, client, post_with_group):
-        try:
-            response = client.get('/')
-        except Exception as e:
-            assert False, f'''Главная страница работает неправильно. Ошибка: `{e}`'''
-        assert response.status_code != 404, (
-            'Главная страница не найдена, проверьте этот адрес в *urls.py*'
-        )
-        assert response.status_code != 500, (
-            'Главная страница не работает. Проверьте ее view-функцию'
-        )
-        assert response.status_code == 200, (
-            'Главная страница работает неправильно.'
-        )
-        # проверка моделей
-        response_text = response.content.decode()
-        posts = Post.objects.all()
-        for p in posts:
-            assert p.text in response_text, (
-                'Убедитесь, что на главной странице выводятся все посты '
-                'с сортировкой по убыванию даты публикации'
-            )
-
     def test_post_model(self):
         model_fields = Post._meta.fields
         text_field = search_field(model_fields, 'text')
@@ -66,12 +46,24 @@ class TestPost:
             'Свойство `text` модели `Post` должно быть текстовым `TextField`'
         )
 
+        pub_date_field_name = 'created'
         pub_date_field = search_field(model_fields, 'pub_date')
-        assert pub_date_field is not None, 'Добавьте дату и время проведения события `pub_date` модели `Post`'
-        assert type(pub_date_field) == fields.DateTimeField, (
-            'Свойство `pub_date` модели `Post` должно быть датой и время `DateTimeField`'
+        if pub_date_field is not None:
+            pub_date_field_name = 'pub_date'
+        else:
+            pub_date_field = search_field(model_fields, 'created')
+            if pub_date_field is not None:
+                pub_date_field_name = 'created'
+
+        assert pub_date_field is not None, (
+            f'Добавьте дату и время проведения события в `{pub_date_field_name}` модели `Post`'
         )
-        assert pub_date_field.auto_now_add, 'Свойство `pub_date` модели `Post` должно быть `auto_now_add`'
+        assert type(pub_date_field) == fields.DateTimeField, (
+            f'Свойство `{pub_date_field_name}` модели `Post` должно быть датой и временем `DateTimeField`'
+        )
+        assert pub_date_field.auto_now_add, (
+            f'Свойство `pub_date` или `created` модели `Post` должно быть `auto_now_add`'
+        )
 
         author_field = search_field(model_fields, 'author_id')
         assert author_field is not None, 'Добавьте пользователя, автор который создал событие `author` модели `Post`'
@@ -97,49 +89,51 @@ class TestPost:
             'Свойство `group` модели `Post` должно быть с атрибутом `null=True`'
         )
 
+        image_field = search_field(model_fields, 'image')
+        assert image_field is not None, 'Добавьте свойство `image` в модель `Post`'
+        assert type(image_field) == fields.files.ImageField, (
+            'Свойство `image` модели `Post` должно быть `ImageField`'
+        )
+        assert image_field.upload_to == 'posts/', (
+            "Свойство `image` модели `Post` должно быть с атрибутом `upload_to='posts/'`"
+        )
+
     @pytest.mark.django_db(transaction=True)
     def test_post_create(self, user):
         text = 'Тестовый пост'
         author = user
 
-        assert Post.objects.all().count() == 0
+        assert Post.objects.count() == 0
 
-        post = Post.objects.create(text=text, author=author)
-        assert Post.objects.all().count() == 1
+        image = tempfile.NamedTemporaryFile(suffix=".jpg").name
+        post = Post.objects.create(text=text, author=author, image=image)
+        assert Post.objects.count() == 1
         assert Post.objects.get(text=text, author=author).pk == post.pk
 
     def test_post_admin(self):
         admin_site = site
 
-        assert Post in admin_site._registry, 'Зарегестрируйте модель `Post` в админской панели'
+        assert Post in admin_site._registry, 'Зарегистрируйте модель `Post` в админской панели'
 
         admin_model = admin_site._registry[Post]
 
         assert 'text' in admin_model.list_display, (
             'Добавьте `text` для отображения в списке модели административного сайта'
         )
-        assert 'pub_date' in admin_model.list_display, (
-            'Добавьте `pub_date` для отображения в списке модели административного сайта'
+
+        assert 'pub_date' in admin_model.list_display or 'created' in admin_model.list_display, (
+            f'Добавьте `pub_date` или `created` для отображения в списке модели административного сайта'
         )
         assert 'author' in admin_model.list_display, (
             'Добавьте `author` для отображения в списке модели административного сайта'
         )
-        assert 'group' in admin_model.list_display, (
-            'Добавьте `group` для отображения в списке модели административного сайта'
-        )
-        assert 'pk' in admin_model.list_display, (
-            'Добавьте `pk` для отображения в списке модели административного сайта'
-        )
+
         assert 'text' in admin_model.search_fields, (
             'Добавьте `text` для поиска модели административного сайта'
         )
 
-        assert 'group' in admin_model.list_editable, (
-            'Добавьте `group` в поля доступные для редактирования в модели административного сайта'
-        )
-
-        assert 'pub_date' in admin_model.list_filter, (
-            'Добавьте `pub_date` для фильтрации модели административного сайта'
+        assert 'pub_date' in admin_model.list_filter or 'created' in admin_model.list_filter, (
+            f'Добавьте `pub_date` или `created` для фильтрации модели административного сайта'
         )
 
         assert hasattr(admin_model, 'empty_value_display'), (
@@ -179,19 +173,19 @@ class TestGroup:
         text = 'Тестовый пост'
         author = user
 
-        assert Post.objects.all().count() == 0
+        assert Post.objects.count() == 0
 
         post = Post.objects.create(text=text, author=author)
-        assert Post.objects.all().count() == 1
+        assert Post.objects.count() == 1
         assert Post.objects.get(text=text, author=author).pk == post.pk
 
         title = 'Тестовая группа'
         slug = 'test-link'
         description = 'Тестовое описание группы'
 
-        assert Group.objects.all().count() == 0
+        assert Group.objects.count() == 0
         group = Group.objects.create(title=title, slug=slug, description=description)
-        assert Group.objects.all().count() == 1
+        assert Group.objects.count() == 1
         assert Group.objects.get(slug=slug).pk == group.pk
 
         post.group = group
@@ -203,17 +197,37 @@ class TestGroupView:
 
     @pytest.mark.django_db(transaction=True)
     def test_group_view(self, client, post_with_group):
+        url = f'/group/{post_with_group.group.slug}'
+        url_templ = '/group/<slug>/'
         try:
-            response = client.get(f'/group/{post_with_group.group.slug}')
+            response = client.get(url)
         except Exception as e:
-            assert False, f'''Страница `/group/<slug>/` работает неправильно. Ошибка: `{e}`'''
+            assert False, f'''Страница `{url_templ}` работает неправильно. Ошибка: `{e}`'''
         if response.status_code in (301, 302):
-            response = client.get(f'/group/{post_with_group.group.slug}/')
+            response = client.get(f'{url}/')
         if response.status_code == 404:
-            assert False, 'Страница `/group/<slug>/` не найдена, проверьте этот адрес в *urls.py*'
+            assert False, f'Страница `{url_templ}` не найдена, проверьте этот адрес в *urls.py*'
 
         if response.status_code != 200:
-            assert False, 'Страница `/group/<slug>/` работает неправильно.'
+            assert False, f'Страница `{url_templ}` работает неправильно.'
+
+        page_context = get_field_from_context(response.context, Page)
+        assert page_context is not None, (
+            f'Проверьте, что передали статьи автора в контекст страницы `{url_templ}` типа `Page`'
+        )
+        assert len(page_context.object_list) == 1, (
+            f'Проверьте, что в контекст страницы переданы правильные статьи автора `{url_templ}`'
+        )
+        posts_list = page_context.object_list
+        for post in posts_list:
+            assert hasattr(post, 'image'), (
+                f'Убедитесь, что статья, передаваемая в контекст страницы `{url_templ}`, имеет поле `image`'
+            )
+            assert getattr(post, 'image') is not None, (
+                f'Убедитесь, что статья, передаваемая в контекст страницы `{url_templ}`, имеет поле `image`, '
+                'и туда передается изображение'
+            )
+
         group = post_with_group.group
         html = response.content.decode()
 
@@ -228,27 +242,58 @@ class TestGroupView:
         )
 
         assert re.search(
-            r'<\s*p(\s+class=".+"|\s*)>\s*' + post_with_group.text + r'\s*<\s*\/p\s*>',
-            html
-        ), 'Отредактируйте HTML-шаблон, не найден текст поста `<p>{{ текст_поста }}</p>`'
-
-        assert re.search(
-            r'(д|Д)ата публикации:\s*',
+            group.title,
             html
         ), (
-            'Отредактируйте HTML-шаблон, не найдена дата публикации '
-            '`дата публикации: {{ дата_публикации|date:"d E Y" }}`'
+            'Отредактируйте HTML-шаблон, не найден заголовок группы '
+            '`{% block header %}{{ название_группы }}{% endblock %}`'
+        )
+        assert re.search(
+            r'<\s*p\s*>\s*' + group.description + r'\s*<\s*\/p\s*>',
+            html
+        ), 'Отредактируйте HTML-шаблон, не найдено описание группы `<p>{{ описание_группы }}</p>`'
+
+
+class TestCustomErrorPages:
+
+    @pytest.mark.django_db(transaction=True)
+    def test_custom_404(self, client):
+        url_invalid = '/some_invalid_url_404/'
+        code = 404
+        response = client.get(url_invalid)
+
+        assert response.status_code == code, (
+            f'Убедитесь, что для несуществующих адресов страниц, сервер возвращает код {code}'
         )
 
-        assert re.search(
-            r'(а|А)втор\:\s' + post_with_group.author.get_full_name(),
-            html,
-        ), (
-            'Отредактируйте HTML-шаблон, не найден автор публикации '
-            '`Автор: {{ полное_имя_автора_поста }},`'
-        )
+        try:
+            from yatube.urls import handler404 as handler404_student
+        except ImportError:
+            assert False, (
+                f'Убедитесь, что для страниц, возвращающих код {code}, '
+                'настроен кастомный шаблон'
+            )
 
-        base_template = get_template('base.html').template.source
-        assert re.search(
-            r'{\%\sload static\s\%}', base_template
-        ), 'Загрузите статику в base.html шаблоне'
+    @pytest.mark.django_db(transaction=True)
+    def test_custom_500(self):
+        code = 500
+
+        try:
+            from yatube.urls import handler500
+        except ImportError:
+            assert False, (
+                f'Убедитесь, что для страниц, возвращающих код {code}, '
+                'настроен кастомный шаблон'
+            )
+
+    @pytest.mark.django_db(transaction=True)
+    def test_custom_403(self):
+        code = 403
+
+        try:
+            from yatube.urls import handler403
+        except ImportError:
+            assert False, (
+                f'Убедитесь, что для страниц, возвращающих код {code}, '
+                'настроен кастомный шаблон'
+            )
